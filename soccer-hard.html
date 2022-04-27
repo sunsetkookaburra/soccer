@@ -360,7 +360,7 @@ else if (BALL_ANGLE > 1)
 				function move_back() { playerA.move(-_SPEED, delta); }
 				function move_left() { playerA.strafe(-_SPEED, delta); }
 				function move_right() { playerA.strafe(_SPEED, delta); }
-				function show(value) { document.getElementById("output-a").value = value || "\u00A0" }
+				function show(value) { document.getElementById("output-a").value = String(value) || "\u00A0" }
 				const DISTANCE = Math.trunc(Math.min(1, Math.max(0, playerA.rect.cx() / 0.645 / 2 * 1.01 + 0.5)) * 100) / 100;
 				const POSITION = Math.trunc(Math.min(1, Math.max(-1, playerA.rect.cy() / 0.395 * 1.01)) * 100) / 100;
 				const BALL_ANGLE = -Math.round(playerA.rect.angleTo(ball.rect) / Math.PI * 180);
