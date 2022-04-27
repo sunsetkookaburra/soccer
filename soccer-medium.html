@@ -330,6 +330,7 @@ else if (BALL_ANGLE > 1)
 		let ms = Date.now();
 
 		window.addEventListener("keydown", ev => {
+			if (ev.target.tagName == "TEXTAREA") return;
 			const key = ev.key.toLowerCase();
 			if (key in ACTION) ACTION[key] = true;
 		});
