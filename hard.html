@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html data-player-pos="0.5,-0.3" data-ball-pos="-0.4,0.3">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Soccer Motivation</title>
+	<style>
+		:root {
+			font-size: 16px;
+		}
+		body {
+			margin: 0;
+			background-color: #edc;
+		}
+		p {
+			min-width: 20rem;
+			margin: 1em auto;
+			text-align: center;
+		}
+		p > code { display: block }
+		canvas {
+			display: block;
+			width: 100%;
+			object-fit: contain;
+			max-height: 60vh;
+			background-color: #222;
+		}
+		#outputs {
+			display: grid;
+			grid-auto-flow: column;
+			background-color: #222;
+			margin: auto;
+			padding: 1rem;
+			gap: 20rem;
+		}
+		#outputs > output {
+			margin: auto;
+			padding: 0.5rem 1rem;
+			background-color: #ba9;
+			font-size: 3rem;
+			font-family: monospace;
+			border-radius: 0.5rem;
+			min-width: 15rem;
+			text-align: center;
+		}
+		#programs {
+			display: grid;
+			grid-auto-flow: column;
+			gap: 10rem;
+		}
+		#programs > div {
+			margin: auto;
+			padding: 2rem;
+		}
+		#programs textarea {
+			display: block;
+			min-width: 25rem;
+			min-height: 20rem;
+			font-size: 1rem;
+		}
+		#programs #program-a-error { min-height: 5rem; font-weight: bold; }
+		#programs button {
+			padding: 0.5rem;
+			font-size: 1rem;
+		}
+	</style>
+</head>
+<body>
+	<canvas id="field" width="2400" height="1600"></canvas>
+	<div id="outputs">
+		<output id="output-a">&nbsp;</output>
+	</div>
+	<div id="programs">
+		<div id="program-a">
+			<button id="program-a-upload">Upload Program</button>
+			<textarea id="program-a-code"></textarea>
+			<br>
+			<textarea id="program-a-error" disabled placeholder="No errors found."></textarea>
+		</div>
+	</div>
+	<p>Player Language Features:</p>
+	<p>
+		<code>move_front()</code>
+		<code>move_back()</code>
+		<code>move_left()</code>
+		<code>move_right()</code>
+		<br>
+		<code>BALL_ANGLE</code>
+		<code>DISTANCE</code>
+		<code>POSITION</code>
+		<br>
+		<code>show(number)</code>
+	</p>
+	<p>
+	BALL_ANGLE is in degrees (no decimal places).<br>
+	DISTANCE is between 0 (own goal) and 1 (opponent goal), in two decimal places.<br>
+	POSITION is between -1 (Player A's left) and 1 (Player A's right), in two decimal places.
+	</P>
+	<!--
+SAMPLE CODE
+----------------------------------------
+show(POSITION)
+
+function move_to(d, p) {
+  if (DISTANCE > d + 0.005)
+    move_back()
+  else if (DISTANCE < d - 0.005)
+    move_front()
+  if (POSITION > p + 0.005)
+    move_left()
+  else if (POSITION < p - 0.005)
+    move_right()
+}
+
+move_to(1.00, 0)
+----------------------------------------
+show(BALL_ANGLE);
+
+if (-5 < BALL_ANGLE && BALL_ANGLE < 5)
+  move_front()
+else if (BALL_ANGLE < -1)
+  move_left()
+else if (BALL_ANGLE > 1)
+  move_right()
+----------------------------------------
+	-->
+	<script>
+		const COLOUR_LINES = "#CCCCAA";
+		const COLOUR_FIELD = "#224422";
+		const COLOUR_ROBOT = "#EECC88";
+		const COLOUR_ROBOT_LETTER = "#442200";
+		const COLOUR_BALL  = "#FF6600";
+		const COLOUR_BALL_OUTLINE = "#FFFF00";
+
+		/** @type {HTMLCanvasElement} */
+		const cnv = document.getElementById("field");
+		const ctx = cnv.getContext("2d");
+		const WIDTH = cnv.width;
+		const HEIGHT = cnv.height;
+
+		function drawField() {
+			// draw grass
+			ctx.fillStyle = COLOUR_FIELD;
+			ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+			// draw lines
+			ctx.lineWidth = 0.008*HEIGHT;
+			ctx.strokeStyle = COLOUR_LINES;
+			ctx.beginPath();
+			// draw top border
+			ctx.moveTo(0.5/30*WIDTH, 7/20*HEIGHT);
+			ctx.lineTo(0.5/30*WIDTH, 0.5/20*HEIGHT);
+			ctx.lineTo(29.5/30*WIDTH, 0.5/20*HEIGHT);
+			ctx.lineTo(29.5/30*WIDTH, 7/20*HEIGHT);
+			ctx.moveTo(29.5/30*WIDTH, 13/20*HEIGHT);
+			ctx.lineTo(29.5/30*WIDTH, 19.5/20*HEIGHT);
+			ctx.lineTo(0.5/30*WIDTH, 19.5/20*HEIGHT);
+			ctx.lineTo(0.5/30*WIDTH, 13/20*HEIGHT);
+			// draw halfway
+			ctx.moveTo(WIDTH/2, 0.5/20*HEIGHT);
+			ctx.lineTo(WIDTH/2, 19.5/20*HEIGHT);
+			// draw left goal
+			ctx.moveTo(0, 7/20*HEIGHT);
+			ctx.lineTo(1/30*WIDTH, 7/20*HEIGHT);
+			ctx.lineTo(1/30*WIDTH, 13/20*HEIGHT);
+			ctx.lineTo(0, 13/20*HEIGHT);
+			// draw right goal
+			ctx.moveTo(WIDTH, 7/20*HEIGHT);
+			ctx.lineTo(29/30*WIDTH, 7/20*HEIGHT);
+			ctx.lineTo(29/30*WIDTH, 13/20*HEIGHT);
+			ctx.lineTo(WIDTH, 13/20*HEIGHT);
+			ctx.stroke();
+		}
+
+		function screenUnit(value) { return HEIGHT * value; }
+		function screenX(x) { return WIDTH / 2 + screenUnit(x); }
+		function screenY(y) { return HEIGHT / 2 + screenUnit(y); }
+		function screenCoord(x, y) { return [screenX(x), screenY(y)]; }
+
+		class Rect {
+			static fromRadius(x, y, r) {
+				return new Rect(x - r, y - r, 2 * r, 2 * r);
+			}
+
+			constructor(x, y, w, h) {
+				this.x = x;
+				this.y = y;
+				this.w = w;
+				this.h = h;
+			}
+
+			cx() { return this.x + this.w / 2; }
+			cy() { return this.y + this.h / 2; }
+			middle() { return [this.cx(), this.cy()]; }
+
+			screen() {
+				return [
+					screenX(this.x), screenY(this.y),
+					screenUnit(this.w), screenUnit(this.h),
+				];
+			}
+
+			moveX(x) { this.x += x; }
+			moveY(y) { this.y += y; }
+
+			scared(other) {
+				if (this.overlaps(other)) {
+					let angle = this.angleTo(other);
+					// right
+					if (Math.abs(angle) <= 0.25*Math.PI) {
+						let dx = (this.x + this.w) - (other.x);
+						let steepness = angle / 0.25*Math.PI;
+						this.x -= 0.005 + dx;
+						this.y += 0.0005 * steepness;
+					}
+					// top
+					else if (0.25*Math.PI < angle && angle < 0.75*Math.PI) {
+						let dy = (other.y + other.h) - (this.y);
+						let steepness = (angle - 0.5*Math.PI) / 0.25*Math.PI;
+						this.y += 0.005 + dy;
+						this.x += 0.0005 * steepness;
+					}
+					// bottom
+					else if (-0.25*Math.PI > angle && angle > -0.75*Math.PI) {
+						let dy = (this.y + this.h) - (other.y);
+						let steepness = -(angle + 0.5*Math.PI) / 0.25*Math.PI;
+						this.y -= 0.005 + dy;
+						this.x += 0.0005 * steepness;
+					}
+					// left
+					else {
+						let dx = (other.x + other.w) - (this.x);
+						let steepness = Math.sign(angle) * (Math.PI - Math.abs(angle)) / 0.25*Math.PI;
+						this.x += 0.005 + dx;
+						this.y += 0.0005 * steepness;
+					}
+				}
+			}
+
+			contains(x, y) {
+				return this.x <= x && x < this.x + this.w && this.y <= y && y < this.y + this.h;
+			}
+
+			corners() {
+				return [
+					[this.x, this.y],
+					[this.x, this.y + this.h],
+					[this.x + this.w , this.y],
+					[this.x + this.w, this.y + this.h],
+				];
+			}
+
+			overlaps(other) {
+				return other.corners().some(p => this.contains(...p))
+					|| this.corners().some(p => other.contains(...p));
+			}
+
+			angleTo(other) {
+				return Math.atan2(this.cy() - other.cy(), other.cx() - this.cx());
+			}
+		}
+
+		class Ball {
+			constructor(x, y) {
+				this.rect = Rect.fromRadius(x, y, 0.04);
+			}
+
+			draw() {
+				const screen = this.rect.screen();
+				ctx.strokeStyle = COLOUR_BALL_OUTLINE;
+				ctx.fillStyle = COLOUR_BALL;
+				ctx.lineWidth = 0.005*HEIGHT;
+				ctx.beginPath();
+				ctx.fillRect(...screen);
+				ctx.strokeRect(...screen);
+			}
+		}
+
+		class Player {
+			constructor(x, y, letter, flip) {
+				this.rect = Rect.fromRadius(x, y, 0.1);
+				this.letter = letter;
+				this.flip = flip;
+			}
+
+			draw() {
+				const screen = this.rect.screen();
+				ctx.fillStyle = COLOUR_ROBOT;
+				ctx.strokeStyle = COLOUR_ROBOT_LETTER;
+				ctx.lineWidth = 0.005*HEIGHT;
+				ctx.fillRect(...screen);
+				ctx.strokeRect(...screen);
+
+				const [cx, cy] = this.rect.middle();
+				const [x, y] = screenCoord(cx, cy);
+				ctx.translate(x, y);
+				ctx.rotate(0.5*Math.PI*(1-this.flip*2));
+				ctx.fillStyle = COLOUR_ROBOT_LETTER;
+				ctx.font = "bold " + screenUnit(0.2).toFixed(0) + "px monospace";
+				ctx.textAlign = "center";
+				ctx.textBaseline = "middle";
+				ctx.fillText(this.letter, 0, screenUnit(0.005));
+				ctx.resetTransform();
+			}
+
+			move(speed, delta) { this.rect.moveX(delta * speed * (1 - this.flip * 2)); }
+			strafe(speed, delta) { this.rect.moveY(delta * speed); }
+		}
+
+		const ACTION = {
+			"w": false, "i": false,
+			"a": false, "j": false,
+			"s": false, "k": false,
+			"d": false, "l": false,
+			"q": false, "u": false,
+			"e": false, "o": false,
+		};
+
+		const initBallPos = document.body.parentElement.getAttribute("data-ball-pos").split(",").map(Number);
+		const initPlayerPos = document.body.parentElement.getAttribute("data-player-pos").split(",").map(Number);
+		const ball = new Ball(initBallPos[0], initBallPos[1]);
+		const playerA = new Player(initPlayerPos[0], initPlayerPos[1], "A", false);
+		// const playerB = new Player(0.2, -0.1, "B");
+		const topWall = new Rect(-0.75, -10.5, 1.5, 10);
+		const bottomWall = new Rect(-0.75, 0.5, 1.5, 10);
+		const leftWall = new Rect(-10.75, -0.5, 10, 1);
+		const rightWall = new Rect(0.75, -0.5, 10, 1);
+		const rightGoal = new Rect(0.73, -0.1, 1, 0.2);
+		const leftGoal = new Rect(-1.73, -0.1, 1, 0.2);
+		let ms = Date.now();
+
+		window.addEventListener("keydown", ev => {
+			if (ev.target.tagName == "TEXTAREA") return;
+			const key = ev.key.toLowerCase();
+			if (key in ACTION) ACTION[key] = true;
+		});
+
+		window.addEventListener("keyup", ev => {
+			const key = ev.key.toLowerCase();
+			if (key in ACTION) ACTION[key] = false;
+		});
+
+		let PROGRAM_A = "";
+		let PROGRAM_B = "";
+
+		document.getElementById("program-a-upload").addEventListener("click", ev => {
+			PROGRAM_A = document.getElementById("program-a-code").value;
+		});
+
+		function draw() {
+			const now = Date.now();
+			const delta = (now - ms) / 1000;
+			ms = now;
+
+			// run playerA code
+			{
+				// define controls
+				const _SPEED = 0.5;
+				function move_front() { playerA.move(_SPEED, delta); }
+				function move_back() { playerA.move(-_SPEED, delta); }
+				function move_left() { playerA.strafe(-_SPEED, delta); }
+				function move_right() { playerA.strafe(_SPEED, delta); }
+				function show(value) { document.getElementById("output-a").value = String(value) || "\u00A0" }
+				const DISTANCE = Math.trunc(Math.min(1, Math.max(0, playerA.rect.cx() / 0.645 / 2 * 1.01 + 0.5)) * 100) / 100;
+				const POSITION = Math.trunc(Math.min(1, Math.max(-1, playerA.rect.cy() / 0.395 * 1.01)) * 100) / 100;
+				const BALL_ANGLE = -Math.round(playerA.rect.angleTo(ball.rect) / Math.PI * 180);
+
+				try {
+					eval(PROGRAM_A);
+					document.getElementById("program-a-error").value = "";
+				} catch (e) {
+					document.getElementById("program-a-error").value = "Error on line " + e.lineNumber + ":\n" + e;
+				}
+			}
+
+			playerA.strafe(0.5 * (ACTION["w"] ^ ACTION["s"]) * (ACTION["s"] - ACTION["w"]), delta);
+			playerA.move(0.5 * (ACTION["a"] ^ ACTION["d"]) * (ACTION["d"] - ACTION["a"]), delta);
+
+			// move ball
+			ball.rect.scared(playerA.rect);
+			// wall collisions
+			ball.rect.scared(topWall);
+			ball.rect.scared(bottomWall);
+			ball.rect.scared(leftWall);
+			ball.rect.scared(rightWall);
+			playerA.rect.scared(topWall);
+			playerA.rect.scared(bottomWall);
+			playerA.rect.scared(leftWall);
+			playerA.rect.scared(rightWall);
+			// move back (ball stuck between player and wall)
+			playerA.rect.scared(ball.rect);
+
+			// redraw
+			drawField();
+			ball.draw();
+			playerA.draw();
+			// playerB.draw();
+
+			if (ball.rect.overlaps(rightGoal)) {
+				alert("Player A wins!");
+				window.location.reload();
+			} else if (ball.rect.overlaps(leftGoal)) {
+				alert("Player B wins!");
+				window.location.reload();
+			}
+
+			// ask for another frame
+			requestAnimationFrame(draw);
+		}
+
+		requestAnimationFrame(draw);
+	</script>
+</body>
+</html>
